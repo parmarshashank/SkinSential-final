@@ -21,16 +21,13 @@ die()     { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 echo -e "\n${BOLD}Skin Disease Classifier — Raspberry Pi 4 Setup${NC}\n"
 
-# ── Verify we're on ARM64 ─────────────────────────────────────────────
-ARCH=$(uname -m)
-if [[ "$ARCH" != "aarch64" ]]; then
-    die "This script is for Raspberry Pi (aarch64). Detected: ${ARCH}"
-fi
+# ── Verify ARM64 ──────────────────────────────────────────────────────
+[[ "$(uname -m)" == "aarch64" ]] || die "This script is for Raspberry Pi (aarch64). Got: $(uname -m)"
 
 # ── 1. System packages ────────────────────────────────────────────────
 info "Installing system packages..."
 sudo apt-get update -qq
-# libatlas-base-dev was removed from Pi OS Bookworm — libopenblas-dev is the replacement.
+# libatlas-base-dev removed from Pi OS Bookworm — libopenblas-dev replaces it.
 sudo apt-get install -y \
     libopenblas-dev libhdf5-dev \
     libjpeg-dev libpng-dev libtiff-dev \
@@ -41,21 +38,35 @@ success "System packages ready"
 
 # ── 2. Miniforge ──────────────────────────────────────────────────────
 info "Checking Miniforge / conda..."
-if command -v conda &>/dev/null; then
-    CONDA_BASE=$(conda info --base 2>/dev/null)
-    source "${CONDA_BASE}/etc/profile.d/conda.sh" 2>/dev/null || true
+
+# Find or install conda, then expose the conda shell function for this script.
+_init_conda() {
+    # Try common install locations
+    for base in "$HOME/miniforge3" "$HOME/anaconda3" "$HOME/miniconda3" \
+                "/opt/conda" "/opt/miniforge3"; do
+        if [[ -f "${base}/etc/profile.d/conda.sh" ]]; then
+            source "${base}/etc/profile.d/conda.sh"
+            return 0
+        fi
+    done
+    # Last resort: ask conda itself
+    local cb
+    cb=$(conda info --base 2>/dev/null) && \
+        source "${cb}/etc/profile.d/conda.sh" && return 0
+    return 1
+}
+
+if command -v conda &>/dev/null || _init_conda 2>/dev/null; then
+    _init_conda 2>/dev/null || true
     success "conda $(conda --version) already installed"
 else
-    info "Downloading Miniforge installer (~80 MB)..."
+    info "Downloading Miniforge (~80 MB)..."
     wget -q --show-progress "${MINIFORGE_URL}" -O "/tmp/${MINIFORGE_INSTALLER}"
-
-    info "Installing Miniforge to ~/miniforge3 ..."
+    info "Installing Miniforge to ~/miniforge3..."
     bash "/tmp/${MINIFORGE_INSTALLER}" -b -p "$HOME/miniforge3"
     rm "/tmp/${MINIFORGE_INSTALLER}"
-
     source "$HOME/miniforge3/etc/profile.d/conda.sh"
     conda init bash 2>/dev/null || true
-
     success "Miniforge installed"
 fi
 
@@ -63,56 +74,59 @@ fi
 info "Checking conda environment '${CONDA_ENV}'..."
 if conda env list | grep -q "^${CONDA_ENV}[[:space:]]"; then
     warn "Environment '${CONDA_ENV}' already exists — skipping creation."
-    warn "To recreate: conda env remove -n ${CONDA_ENV}"
 else
-    info "Creating conda environment '${CONDA_ENV}' (Python ${PYTHON_VER})..."
+    info "Creating '${CONDA_ENV}' (Python ${PYTHON_VER})..."
     conda create -n "${CONDA_ENV}" python="${PYTHON_VER}" -y
 fi
 success "Conda environment ready"
 
-# ── 4. Activate and install packages ─────────────────────────────────
-info "Activating '${CONDA_ENV}' and installing packages..."
-conda activate "${CONDA_ENV}"
-pip install --upgrade pip --quiet
+# ── Helper: run commands inside the env without needing 'conda activate'
+# 'conda activate' requires an interactive shell; 'conda run' works anywhere.
+CR() { conda run -n "${CONDA_ENV}" --no-capture-output "$@"; }
 
-# opencv + tk from conda-forge (pre-built ARM64, no compile needed)
+# ── 4. opencv + tk via conda-forge ───────────────────────────────────
 info "Installing opencv and tk from conda-forge..."
-conda install -c conda-forge opencv tk -y --quiet
-success "opencv and tk installed"
+conda install -n "${CONDA_ENV}" -c conda-forge opencv tk -y --quiet
+success "opencv $(CR python -c 'import cv2; print(cv2.__version__)') installed"
 
-# Python packages
-info "Installing tensorflow, Pillow, matplotlib, numpy..."
-pip install tensorflow numpy Pillow matplotlib --quiet
+# ── 5. Python packages via pip ────────────────────────────────────────
+info "Upgrading pip..."
+CR pip install --upgrade pip --quiet
+
+info "Installing tensorflow, numpy, Pillow, matplotlib..."
+CR pip install tensorflow numpy Pillow matplotlib --quiet
 success "Python packages installed"
 
-# ── 5. Verify imports ─────────────────────────────────────────────────
+# ── 6. Verify imports ─────────────────────────────────────────────────
 info "Verifying imports..."
 FAILED=0
+check() {
+    local label="$1"; shift
+    CR python -c "$@" 2>/dev/null || { warn "${label} import FAILED"; FAILED=1; }
+}
 
-python -c "import cv2;         print(f'  cv2        {cv2.__version__}')"      || { warn "cv2 failed";        FAILED=1; }
-python -c "import tensorflow as tf; print(f'  tensorflow {tf.__version__}')"  || { warn "tensorflow failed"; FAILED=1; }
-python -c "import tkinter;     print(f'  tkinter    OK')"                      || { warn "tkinter failed";    FAILED=1; }
-python -c "import PIL;         print(f'  Pillow     {PIL.__version__}')"       || { warn "Pillow failed";     FAILED=1; }
-python -c "import numpy as np; print(f'  numpy      {np.__version__}')"        || { warn "numpy failed";      FAILED=1; }
+check "cv2"        "import cv2;              print(f'  cv2        {cv2.__version__}')"
+check "tensorflow" "import tensorflow as tf; print(f'  tensorflow {tf.__version__}')"
+check "tkinter"    "import tkinter;          print(f'  tkinter    OK')"
+check "Pillow"     "import PIL;              print(f'  Pillow     {PIL.__version__}')"
+check "numpy"      "import numpy as np;      print(f'  numpy      {np.__version__}')"
+check "matplotlib" "import matplotlib;       print(f'  matplotlib {matplotlib.__version__}')"
 
 if [[ $FAILED -eq 1 ]]; then
-    warn "Some imports failed — check warnings above."
-else
-    success "All imports OK"
+    warn "Some imports failed — check messages above."
+    exit 1
 fi
+success "All imports OK"
 
-# ── 6. Copy reminder ─────────────────────────────────────────────────
+# ── 7. Done ───────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${GREEN}Setup complete!${NC}"
 echo ""
-echo "Next steps:"
-echo "  1. Copy project files to this Pi (from your Mac):"
-echo -e "     ${CYAN}scp -r user@mac-ip:~/Desktop/proj ~/proj${NC}"
+echo "To run the app — open a new terminal (so conda init takes effect), then:"
 echo ""
-echo "  2. Run the app:"
-echo -e "     ${CYAN}conda activate ${CONDA_ENV}${NC}"
-echo -e "     ${CYAN}cd ~/proj${NC}"
-echo -e "     ${CYAN}python app.py${NC}"
+echo -e "  ${CYAN}conda activate ${CONDA_ENV}${NC}"
+echo -e "  ${CYAN}cd ~/proj${NC}"
+echo -e "  ${CYAN}python app.py${NC}"
 echo ""
-echo "Note: First run imports TensorFlow — expect ~15 sec startup on Pi."
+echo "Note: First launch imports TensorFlow — expect ~15 sec startup on Pi."
 echo ""
