@@ -30,12 +30,23 @@ fi
 # ── 1. System packages ────────────────────────────────────────────────
 info "Installing system packages..."
 sudo apt-get update -qq
-sudo apt-get install -y \
-    libatlas-base-dev libopenblas-dev libhdf5-dev \
-    libjpeg-dev libpng-dev libtiff-dev \
-    libavcodec-dev libavformat-dev libswscale-dev \
-    python3-tk wget curl git \
-    > /dev/null
+# libatlas-base-dev was removed from Pi OS Bookworm; libopenblas-dev replaces it.
+# We try both and skip whichever is unavailable.
+PKGS=(
+    libopenblas-dev libhdf5-dev
+    libjpeg-dev libpng-dev libtiff-dev
+    libavcodec-dev libavformat-dev libswscale-dev
+    python3-tk wget curl git
+)
+
+# Add libatlas only if available (older Pi OS / Bullseye)
+if apt-cache show libatlas-base-dev &>/dev/null 2>&1; then
+    PKGS+=(libatlas-base-dev)
+else
+    warn "libatlas-base-dev not available on this OS — using libopenblas-dev instead (fine for Bookworm)"
+fi
+
+sudo apt-get install -y "${PKGS[@]}" > /dev/null
 success "System packages ready"
 
 # ── 2. Miniforge ──────────────────────────────────────────────────────
