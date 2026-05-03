@@ -559,17 +559,26 @@ class _CameraDialog(tk.Toplevel):
         self.title("Select Camera Source")
         self.geometry(f"{self._W}x{self._H}")
         self.resizable(False, False)
-        self.grab_set()
         self.configure(bg=BG)
         self.result = None
 
-        self._mode     = tk.StringVar(value="local")   # "local" | "ip"
-        self._idx_var  = tk.IntVar(value=config.DEFAULT_CAMERA_INDEX)
-        self._url_var  = tk.StringVar(value=config.DEFAULT_STREAM_URL)
+        self._mode    = tk.StringVar(value="local")
+        self._idx_var = tk.IntVar(value=config.DEFAULT_CAMERA_INDEX)
+        self._url_var = tk.StringVar(value=config.DEFAULT_STREAM_URL)
         self._cameras: list[int] = []
 
         self._build()
         self._center(parent)
+
+        # Wait until the window is actually mapped by the window manager
+        # before calling grab_set() — required on Pi / some Linux WMs.
+        self.update_idletasks()
+        try:
+            self.wait_visibility()
+            self.grab_set()
+        except tk.TclError:
+            pass  # non-fatal: dialog still works, just not strictly modal
+
         threading.Thread(target=self._do_scan, daemon=True).start()
 
     # ------------------------------------------------------------------
