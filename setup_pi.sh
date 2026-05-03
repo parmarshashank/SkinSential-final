@@ -90,8 +90,11 @@ conda install -n "${CONDA_ENV}" -c conda-forge opencv tk -y --quiet
 success "opencv $(CR python -c 'import cv2; print(cv2.__version__)') installed"
 
 # ── 5. Python packages via pip ────────────────────────────────────────
-# Use 'python -m pip' — guarantees we use the pip inside the conda env,
-# not any system pip that 'conda run pip' might accidentally resolve to.
+# Ensure pip exists inside the env first (not always installed by default).
+info "Ensuring pip is installed in the env..."
+conda install -n "${CONDA_ENV}" pip -y --quiet
+success "pip ready"
+
 info "Upgrading pip..."
 CR python -m pip install --upgrade pip --quiet
 
