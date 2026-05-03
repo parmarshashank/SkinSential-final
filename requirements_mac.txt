@@ -1,0 +1,14 @@
+# ─── Mac / Development ──────────────────────────────────────────────
+# Python 3.9 or 3.10 both work.
+# tkinter ships with the official python.org installer.
+# If you installed Python via Homebrew, install python-tk separately:
+#   brew install python-tk@3.10   (or python-tk@3.9)
+#
+# OpenCV: PyPI wheels for opencv-python 4.9+ crash on macOS 26 (Tahoe).
+# Install via Homebrew instead — see README for instructions.
+# The line below is intentionally omitted; do NOT pip install opencv-python.
+
+tensorflow>=2.12.0,<2.17.0
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
+matplotlib>=3.7.0

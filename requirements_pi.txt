@@ -1,0 +1,13 @@
+# ─── Raspberry Pi 4 / Deployment ────────────────────────────────────
+# Python 3.10  (install via deadsnakes PPA on Raspberry Pi OS Bookworm)
+# tkinter:  sudo apt install python3-tk
+# OpenCV system libs:  sudo apt install libatlas-base-dev libhdf5-dev
+#
+# tflite-runtime replaces the full tensorflow package — ~5 MB vs ~500 MB.
+# Pre-built wheels: https://github.com/google-coral/pycoral/releases
+
+tflite-runtime>=2.13.0
+opencv-python>=4.8.0
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
+matplotlib>=3.7.0
