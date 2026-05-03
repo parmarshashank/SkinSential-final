@@ -90,11 +90,13 @@ conda install -n "${CONDA_ENV}" -c conda-forge opencv tk -y --quiet
 success "opencv $(CR python -c 'import cv2; print(cv2.__version__)') installed"
 
 # ── 5. Python packages via pip ────────────────────────────────────────
+# Use 'python -m pip' — guarantees we use the pip inside the conda env,
+# not any system pip that 'conda run pip' might accidentally resolve to.
 info "Upgrading pip..."
-CR pip install --upgrade pip --quiet
+CR python -m pip install --upgrade pip --quiet
 
 info "Installing tensorflow, numpy, Pillow, matplotlib..."
-CR pip install tensorflow numpy Pillow matplotlib --quiet
+CR python -m pip install tensorflow numpy Pillow matplotlib --quiet
 success "Python packages installed"
 
 # ── 6. Verify imports ─────────────────────────────────────────────────

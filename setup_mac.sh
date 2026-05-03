@@ -92,8 +92,8 @@ success "opencv $(python -c 'import cv2; print(cv2.__version__)') installed"
 
 # ── 6. Python packages via pip ────────────────────────────────────────
 info "Installing tensorflow, numpy, Pillow, matplotlib..."
-pip install --upgrade pip --quiet
-pip install "tensorflow>=2.12.0,<2.17.0" numpy Pillow matplotlib --quiet
+python -m pip install --upgrade pip --quiet
+python -m pip install "tensorflow>=2.12.0,<2.17.0" numpy Pillow matplotlib --quiet
 success "Python packages installed"
 
 # ── 7. Verify all imports ─────────────────────────────────────────────
