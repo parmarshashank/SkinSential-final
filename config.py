@@ -39,7 +39,9 @@ TF_SAVEDMODEL_DIR  = "skinsential_model"
 
 # ── Classes ──────────────────────────────────────────────────────────
 # Must match the output order of the model.
-CLASSES = ["melanoma", "psoriasis", "ringworm", "normal"]
+# Must match the alphabetical order that image_dataset_from_directory assigns.
+# (0=melanoma, 1=normal, 2=psoriasis, 3=ringworm)
+CLASSES = ["melanoma", "normal", "psoriasis", "ringworm"]
 
 # ── UI ───────────────────────────────────────────────────────────────
 # Default window size (pixels).  The window is resizable; this is just
