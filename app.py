@@ -45,7 +45,7 @@ import config
 # ------------------------------------------------------------------
 _DIR          = os.path.dirname(os.path.abspath(__file__))
 TFLITE_MODEL  = os.path.join(_DIR, config.TFLITE_MODEL_FILE)
-TF_SAVEDMODEL = os.path.join(_DIR, config.TF_SAVEDMODEL_DIR)
+TF_SAVEDMODEL = os.path.join(_DIR, config.TF_SAVEDMODEL_FILE)
 
 # ------------------------------------------------------------------
 # Palette  (works on Aqua/macOS + Raspbian — Label-based buttons)
@@ -90,7 +90,12 @@ class SkinClassifierApp:
         self._load_tflite()
         self._gradcam: GradCAMExplainer | None = None
 
+        # Camera source: int (local device) or str (IP/RTSP URL).
+        # Auto-selected at startup — local camera 0 if available, else IP stream.
+        self._camera_source = self._detect_default_source()
+
         self._build_ui()
+        self._refresh_source_label()
         self._set_status("Ready — load an image to begin.")
 
     # ------------------------------------------------------------------
@@ -111,6 +116,23 @@ class SkinClassifierApp:
             messagebox.showerror("Model Error",
                 f"Failed to load TFLite model:\n{TFLITE_MODEL}\n\n{exc}")
             raise SystemExit(1) from exc
+
+    def _detect_default_source(self):
+        """Use local camera 0 if available, otherwise fall back to IP stream."""
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            cap.release()
+            return 0
+        return config.DEFAULT_STREAM_URL
+
+    def _source_label(self) -> str:
+        s = self._camera_source
+        if isinstance(s, int):
+            return f"Camera {s}  (local)"
+        return s
+
+    def _refresh_source_label(self):
+        self._src_var.set(f"  Source: {self._source_label()}")
 
     @property
     def gradcam(self) -> GradCAMExplainer:
@@ -162,28 +184,43 @@ class SkinClassifierApp:
         # Redraw image whenever the preview frame is resized
         self._preview_frame.bind("<Configure>", self._on_preview_resize)
 
-        # ── Row 3: Capture / Upload ────────────────────────────────────
+        # ── Row 3: Source bar ──────────────────────────────────────────
+        src_bar = tk.Frame(root, bg="#E2E6EF")
+        src_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 4))
+
+        self._src_var = tk.StringVar()
+        tk.Label(src_bar, textvariable=self._src_var,
+                 font=("Helvetica", 9), bg="#E2E6EF", fg=TEXT_MID,
+                 anchor="w", padx=4, pady=4,
+        ).pack(side="left", fill="x", expand=True)
+
+        _ColorButton(src_bar, "⚙  Camera", self._open_camera_settings,
+                     "#5A6270", font=("Helvetica", 9, "bold"),
+                     padx=10, pady=4,
+        ).pack(side="right", padx=4, pady=3)
+
+        # ── Row 4: Capture / Upload ────────────────────────────────────
         btn_row = tk.Frame(root, bg=BG)
-        btn_row.grid(row=3, column=0, pady=(0, 6))
+        btn_row.grid(row=4, column=0, pady=(0, 6))
 
         self._btn_capture = _ColorButton(
-            btn_row, "Capture Webcam", self.capture_image, BTN_BLUE)
+            btn_row, "Capture Image", self.capture_image, BTN_BLUE)
         self._btn_capture.pack(side="left", padx=8)
 
         self._btn_upload = _ColorButton(
             btn_row, "Upload Image", self.upload_image, BTN_GREY)
         self._btn_upload.pack(side="left", padx=8)
 
-        # ── Row 4: Predict ─────────────────────────────────────────────
+        # ── Row 5: Predict ─────────────────────────────────────────────
         self._btn_predict = _ColorButton(
             root, "        Predict        ", self.predict, BTN_GREEN,
             font=("Helvetica", 13, "bold"), padx=36, pady=10)
-        self._btn_predict.grid(row=4, column=0, pady=(0, 8))
+        self._btn_predict.grid(row=5, column=0, pady=(0, 8))
         self._btn_predict.set_enabled(False)
 
-        # ── Row 5: Result card ─────────────────────────────────────────
+        # ── Row 6: Result card ─────────────────────────────────────────
         result_border = tk.Frame(root, bg=ACCENT_LINE)
-        result_border.grid(row=5, column=0, padx=24, pady=(0, 8), sticky="ew")
+        result_border.grid(row=6, column=0, padx=24, pady=(0, 8), sticky="ew")
 
         result_card = tk.Frame(result_border, bg=CARD_BG, padx=18, pady=12)
         result_card.pack(fill="both", padx=1, pady=1)
@@ -200,34 +237,29 @@ class SkinClassifierApp:
             font=FONT_CONF, bg=CARD_BG, fg=TEXT_MID, anchor="e")
         self._lbl_confidence.grid(row=0, column=1, sticky="e")
 
-        # ── Row 6: Explain ─────────────────────────────────────────────
+        # ── Row 7: Explain ─────────────────────────────────────────────
         self._btn_explain = _ColorButton(
             root, "Explain (Grad-CAM)", self.explain, BTN_ORANGE)
-        self._btn_explain.grid(row=6, column=0, pady=(0, 4))
+        self._btn_explain.grid(row=7, column=0, pady=(0, 4))
         self._btn_explain.set_enabled(False)
 
-        # ── Row 7: Status bar ──────────────────────────────────────────
+        # ── Row 8: Status bar ──────────────────────────────────────────
         self._status_var = tk.StringVar()
         tk.Label(root, textvariable=self._status_var,
                  font=FONT_STATUS, bg="#C8CDD8", fg=TEXT_MID,
                  anchor="w", padx=10, pady=4
-        ).grid(row=7, column=0, sticky="ew")
+        ).grid(row=8, column=0, sticky="ew")
 
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
 
     def capture_image(self):
-        """Open the camera-source dialog, then grab one frame."""
-        dialog = _CameraDialog(self.root)
-        self.root.wait_window(dialog)
-
-        source = dialog.result
-        if source is None:
-            return  # user cancelled
-
-        label = f"stream {source}" if isinstance(source, str) else f"camera {source}"
+        """Capture directly from the current camera source — no dialog."""
+        source = self._camera_source
+        label  = self._source_label()
         self._set_status(f"Capturing from {label}…")
+        self._btn_capture.set_enabled(False)
         self.root.update_idletasks()
 
         def _worker():
@@ -235,12 +267,22 @@ class SkinClassifierApp:
                 pil = _capture_frame(source)
                 self.root.after(0, lambda: self._load_pil(pil))
                 self.root.after(0, lambda: self._set_status(
-                    f"Captured from {label} — click Predict."))
+                    f"Captured — click Predict."))
             except Exception as exc:
                 self.root.after(0, lambda: messagebox.showerror("Camera Error", str(exc)))
                 self.root.after(0, lambda: self._set_status("Capture failed."))
+            finally:
+                self.root.after(0, lambda: self._btn_capture.set_enabled(True))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _open_camera_settings(self):
+        """Open the camera source picker dialog."""
+        dlg = _CameraSettingsDialog(self.root, self._camera_source)
+        self.root.wait_window(dlg)
+        if dlg.result is not None:
+            self._camera_source = dlg.result
+            self._refresh_source_label()
 
     def upload_image(self):
         path = filedialog.askopenfilename(
@@ -631,294 +673,198 @@ class _NumpadDialog(tk.Toplevel):
         self.destroy()
 
 
-class _CameraDialog(tk.Toplevel):
+class _CameraSettingsDialog(tk.Toplevel):
     """
-    Full-size camera picker with two panels:
-      LEFT  — local / Continuity Camera (auto-scanned listbox)
-      RIGHT — iPhone IP / RTSP stream (URL entry)
+    Simple camera settings dialog — flat single view, no tabs.
+    Shows detected local cameras in a dropdown + IP stream URL field.
+    Pre-selects the currently active source.
     """
 
-    _W, _H = 580, 370
+    _W, _H = 480, 360
 
-    def __init__(self, parent: tk.Tk):
+    def __init__(self, parent: tk.Tk, current_source):
         super().__init__(parent)
-        self.title("Select Camera Source")
+        self.title("Camera Settings")
         self.geometry(f"{self._W}x{self._H}")
         self.resizable(False, False)
         self.configure(bg=BG)
         self.result = None
 
-        self._mode    = tk.StringVar(value="local")
-        self._idx_var = tk.IntVar(value=config.DEFAULT_CAMERA_INDEX)
-        self._url_var = tk.StringVar(value=config.DEFAULT_STREAM_URL)
+        self._current  = current_source
+        self._mode     = tk.StringVar(value="ip" if isinstance(current_source, str) else "local")
+        self._idx_var  = tk.IntVar(value=current_source if isinstance(current_source, int) else 0)
+        self._url_var  = tk.StringVar(value=current_source if isinstance(current_source, str)
+                                      else config.DEFAULT_STREAM_URL)
         self._cameras: list[int] = []
 
         self._build()
-        self._center(parent)
+        px = parent.winfo_x() + parent.winfo_width()  // 2
+        py = parent.winfo_y() + parent.winfo_height() // 2
+        self.geometry(f"{self._W}x{self._H}+{px - self._W//2}+{py - self._H//2}")
 
-        # Wait until the window is actually mapped by the window manager
-        # before calling grab_set() — required on Pi / some Linux WMs.
         self.update_idletasks()
         try:
             self.wait_visibility()
             self.grab_set()
         except tk.TclError:
-            pass  # non-fatal: dialog still works, just not strictly modal
+            pass
 
         threading.Thread(target=self._do_scan, daemon=True).start()
 
     # ------------------------------------------------------------------
     def _build(self):
-        # ── Header ────────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg=TEXT_DARK)
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="Select Camera Source",
-                 font=("Helvetica", 14, "bold"),
-                 bg=TEXT_DARK, fg="white", pady=12
-        ).pack()
+        tk.Label(self, text="Camera Settings",
+                 font=("Helvetica", 13, "bold"), bg=BG, fg=TEXT_DARK,
+        ).pack(pady=(14, 10))
 
-        # ── Tab bar ───────────────────────────────────────────────────
-        tab_bar = tk.Frame(self, bg=ACCENT_LINE)
-        tab_bar.pack(fill="x")
+        tk.Frame(self, bg=ACCENT_LINE, height=1).pack(fill="x", padx=20)
 
-        self._tab_local = tk.Label(
-            tab_bar, text="  Local / Continuity Camera  ",
-            font=("Helvetica", 11, "bold"),
-            bg=BTN_BLUE, fg="white", pady=8, cursor="hand2")
-        self._tab_local.pack(side="left")
-        self._tab_local.bind("<Button-1>", lambda _: self._switch("local"))
+        body = tk.Frame(self, bg=BG)
+        body.pack(fill="both", expand=True, padx=20, pady=10)
 
-        self._tab_ip = tk.Label(
-            tab_bar, text="  iPhone over WiFi (IP)  ",
-            font=("Helvetica", 11, "bold"),
-            bg=ACCENT_LINE, fg=TEXT_MID, pady=8, cursor="hand2")
-        self._tab_ip.pack(side="left")
-        self._tab_ip.bind("<Button-1>", lambda _: self._switch("ip"))
+        # ── Local cameras ──────────────────────────────────────────────
+        local_row = tk.Frame(body, bg=BG)
+        local_row.pack(fill="x", pady=(0, 6))
 
-        # ── Content area ──────────────────────────────────────────────
-        self._content = tk.Frame(self, bg=BG)
-        self._content.pack(fill="both", expand=True, padx=24, pady=16)
-
-        self._panel_local = self._build_local_panel(self._content)
-        self._panel_ip    = self._build_ip_panel(self._content)
-        self._panel_local.pack(fill="both", expand=True)
-
-        # ── Bottom bar ────────────────────────────────────────────────
-        bar = tk.Frame(self, bg="#E8EAF0", pady=10)
-        bar.pack(fill="x", side="bottom")
-        _ColorButton(bar, "  Cancel  ", self._cancel, BTN_GREY,
-                     padx=16, pady=8).pack(side="right", padx=(8, 20))
-        _ColorButton(bar, "  Capture  ", self._confirm, BTN_GREEN,
-                     font=("Helvetica", 12, "bold"), padx=16, pady=8
-        ).pack(side="right", padx=4)
-
-    # ── Local panel ───────────────────────────────────────────────────
-    def _build_local_panel(self, parent):
-        f = tk.Frame(parent, bg=BG)
-
-        tk.Label(f, text="Detected cameras on this device:",
-                 font=("Helvetica", 11), bg=BG, fg=TEXT_DARK
-        ).pack(anchor="w", pady=(0, 6))
-
-        # Listbox + scrollbar
-        list_frame = tk.Frame(f, bg=ACCENT_LINE, bd=1, relief="flat")
-        list_frame.pack(fill="both", expand=True)
-
-        self._listbox = tk.Listbox(
-            list_frame,
-            font=("Helvetica", 12),
-            bg=CARD_BG, fg=TEXT_DARK,
-            selectbackground=BTN_BLUE, selectforeground="white",
-            activestyle="none",
-            relief="flat", bd=0,
-            height=5,
-        )
-        self._listbox.pack(side="left", fill="both", expand=True, padx=2, pady=2)
-
-        sb = tk.Scrollbar(list_frame, orient="vertical",
-                          command=self._listbox.yview)
-        sb.pack(side="right", fill="y")
-        self._listbox.config(yscrollcommand=sb.set)
-
-        self._listbox.insert("end", "  Scanning for cameras…")
-        self._listbox.config(state="disabled")
-
-        tk.Label(f,
-                 text="Mac tip: iPhone appears automatically as a Continuity Camera\n"
-                      "(index 1 or 2) when connected via USB or same WiFi — no app needed.",
-                 font=("Helvetica", 9), bg=BG, fg=TEXT_LIGHT, justify="left"
-        ).pack(anchor="w", pady=(8, 0))
-
-        return f
-
-    # ── IP panel ──────────────────────────────────────────────────────
-    def _build_ip_panel(self, parent):
-        f = tk.Frame(parent, bg=BG)
-
-        tk.Label(f, text="Stream URL from your iPhone camera app:",
-                 font=("Helvetica", 11), bg=BG, fg=TEXT_DARK
-        ).pack(anchor="w", pady=(0, 6))
-
-        entry_row = tk.Frame(f, bg=BG)
-        entry_row.pack(fill="x")
-
-        entry_frame = tk.Frame(entry_row, bg=ACCENT_LINE, bd=1, relief="flat")
-        entry_frame.pack(side="left", fill="x", expand=True)
-
-        self._url_entry = tk.Entry(
-            entry_frame, textvariable=self._url_var,
-            font=("Helvetica", 12), relief="flat", bd=6,
-            bg=CARD_BG, fg=TEXT_DARK, insertbackground=TEXT_DARK,
-        )
-        self._url_entry.pack(fill="x")
-
-        # Numpad button — tap to type IP without a physical keyboard (Pi touchscreen)
-        _ColorButton(entry_row, "  IP  ", self._open_numpad, BTN_BLUE,
-                     font=("Helvetica", 11, "bold"), padx=10, pady=6,
-        ).pack(side="left", padx=(6, 0))
-
-        # Format hint
-        tk.Label(f,
-                 text="Supported formats (app detects automatically):\n"
-                      "  http://192.168.x.x:8080/live       HTTP MJPEG stream\n"
-                      "  http://192.168.x.x:8080/shot.jpg   single snapshot\n"
-                      "  rtsp://192.168.x.x:554/stream      RTSP",
-                 font=("Courier", 9), bg=BG, fg=TEXT_MID, justify="left",
-        ).pack(anchor="w", pady=(8, 4))
-
-        # Test connection button + result label
-        test_row = tk.Frame(f, bg=BG)
-        test_row.pack(fill="x", pady=(10, 0))
-
-        self._test_result = tk.Label(
-            test_row, text="", font=("Helvetica", 10),
-            bg=BG, fg=TEXT_MID, justify="left", wraplength=460)
-        self._test_result.pack(side="right", expand=True, fill="x", padx=(8, 0))
-
-        _ColorButton(test_row, "Test Connection", self._test_connection,
-                     BTN_BLUE, padx=12, pady=6,
-                     font=("Helvetica", 10, "bold")
+        tk.Radiobutton(local_row, text="Local camera:",
+                       variable=self._mode, value="local",
+                       bg=BG, fg=TEXT_DARK, font=("Helvetica", 11),
+                       activebackground=BG, selectcolor=BG,
+                       command=self._on_mode_change,
         ).pack(side="left")
 
-        tk.Label(f,
-                 text="Replace 192.168.x.x with the IP shown in the app.\n"
-                      "Works on both Mac and Raspberry Pi over the same WiFi.",
-                 font=("Helvetica", 9), bg=BG, fg=TEXT_LIGHT, justify="left"
-        ).pack(anchor="w", pady=(8, 0))
+        self._cam_menu_var = tk.StringVar()
+        self._cam_menu = tk.OptionMenu(local_row, self._cam_menu_var, "Scanning…")
+        self._cam_menu.config(font=("Helvetica", 11), bg=CARD_BG,
+                              relief="flat", highlightthickness=1,
+                              highlightbackground=ACCENT_LINE)
+        self._cam_menu.pack(side="left", padx=(8, 0))
 
-        return f
+        # ── IP stream ──────────────────────────────────────────────────
+        tk.Frame(body, bg=ACCENT_LINE, height=1).pack(fill="x", pady=8)
 
-    # ------------------------------------------------------------------
-    def _switch(self, mode: str):
-        self._mode.set(mode)
-        if mode == "local":
-            self._panel_ip.pack_forget()
-            self._panel_local.pack(fill="both", expand=True)
-            self._tab_local.config(bg=BTN_BLUE, fg="white")
-            self._tab_ip.config(bg=ACCENT_LINE, fg=TEXT_MID)
+        ip_row = tk.Frame(body, bg=BG)
+        ip_row.pack(fill="x", pady=(0, 4))
+
+        tk.Radiobutton(ip_row, text="IP / WiFi stream:",
+                       variable=self._mode, value="ip",
+                       bg=BG, fg=TEXT_DARK, font=("Helvetica", 11),
+                       activebackground=BG, selectcolor=BG,
+                       command=self._on_mode_change,
+        ).pack(side="left")
+
+        url_frame = tk.Frame(body, bg=BG)
+        url_frame.pack(fill="x")
+
+        ef = tk.Frame(url_frame, bg=ACCENT_LINE, bd=1)
+        ef.pack(side="left", fill="x", expand=True)
+        self._url_entry = tk.Entry(ef, textvariable=self._url_var,
+                                   font=("Helvetica", 11), relief="flat", bd=5,
+                                   bg=CARD_BG, fg=TEXT_DARK,
+                                   insertbackground=TEXT_DARK)
+        self._url_entry.pack(fill="x")
+
+        _ColorButton(url_frame, "IP", self._open_numpad, BTN_BLUE,
+                     font=("Helvetica", 10, "bold"), padx=10, pady=5,
+        ).pack(side="left", padx=(6, 0))
+
+        # Test
+        test_row = tk.Frame(body, bg=BG)
+        test_row.pack(fill="x", pady=(8, 0))
+
+        _ColorButton(test_row, "Test Connection", self._test_conn,
+                     BTN_BLUE, font=("Helvetica", 10, "bold"), padx=12, pady=5,
+        ).pack(side="left")
+
+        self._test_lbl = tk.Label(test_row, text="",
+                                  font=("Helvetica", 10), bg=BG, fg=TEXT_MID,
+                                  wraplength=280, justify="left")
+        self._test_lbl.pack(side="left", padx=(10, 0))
+
+        # ── Bottom buttons ─────────────────────────────────────────────
+        tk.Frame(self, bg=ACCENT_LINE, height=1).pack(fill="x", padx=20)
+        bar = tk.Frame(self, bg=BG, pady=10)
+        bar.pack(fill="x")
+        _ColorButton(bar, "Cancel", self._cancel, BTN_GREY,
+                     padx=16, pady=8).pack(side="right", padx=(4, 20))
+        _ColorButton(bar, "  Save  ", self._confirm, BTN_GREEN,
+                     font=("Helvetica", 11, "bold"), padx=16, pady=8,
+        ).pack(side="right", padx=4)
+
+        self._on_mode_change()
+
+    def _on_mode_change(self):
+        if self._mode.get() == "ip":
+            self._url_entry.config(state="normal")
+            self._cam_menu.config(state="disabled")
         else:
-            self._panel_local.pack_forget()
-            self._panel_ip.pack(fill="both", expand=True)
-            self._tab_ip.config(bg=BTN_BLUE, fg="white")
-            self._tab_local.config(bg=ACCENT_LINE, fg=TEXT_MID)
-            # Select all only if it still contains the placeholder,
-            # so the user can just start typing their IP immediately.
-            self._url_entry.focus_set()
-            if "192.168.x.x" in self._url_var.get():
-                self._url_entry.after(50, lambda: self._url_entry.select_range(0, "end"))
+            self._url_entry.config(state="disabled")
+            self._cam_menu.config(state="normal")
 
     def _do_scan(self):
         cameras = _scan_cameras()
         self._cameras = cameras
-        self.after(0, self._update_listbox)
+        self.after(0, self._update_menu)
 
-    def _update_listbox(self):
-        self._listbox.config(state="normal")
-        self._listbox.delete(0, "end")
+    def _update_menu(self):
+        menu = self._cam_menu["menu"]
+        menu.delete(0, "end")
 
         if not self._cameras:
-            self._listbox.insert("end", "  No cameras detected")
-            self._listbox.config(state="disabled")
+            self._cam_menu_var.set("No cameras found")
             return
 
-        NAMES = {0: "Camera 0  —  built-in / default webcam"}
+        NAMES = {0: "Camera 0 (built-in)"}
         for i in self._cameras:
-            label = NAMES.get(i, f"Camera {i}  —  Continuity Camera / external")
-            self._listbox.insert("end", f"  {label}")
+            label = NAMES.get(i, f"Camera {i} (external)")
+            menu.add_command(label=label,
+                             command=lambda v=i, l=label: (self._idx_var.set(v),
+                                                           self._cam_menu_var.set(l)))
 
-        self._listbox.selection_set(0)
-        self._listbox.activate(0)
+        first = self._cameras[0]
+        # Pre-select matching camera if current source is local
+        if isinstance(self._current, int) and self._current in self._cameras:
+            first = self._current
+        label = NAMES.get(first, f"Camera {first} (external)")
+        self._idx_var.set(first)
+        self._cam_menu_var.set(label)
 
     def _open_numpad(self):
-        """Open the IP numpad — lets Pi touchscreen users type an IP address."""
-        # Extract current IP from URL to pre-fill
         import re
         url = self._url_var.get()
-        m = re.search(r"://([0-9.]+)", url)
-        current_ip = m.group(1) if m else ""
-
-        dlg = _NumpadDialog(self, current_ip)
+        m   = re.search(r"://([0-9.]+)", url)
+        dlg = _NumpadDialog(self, m.group(1) if m else "")
         self.wait_window(dlg)
-        if dlg.result is None:
-            return
+        if dlg.result:
+            new_ip = dlg.result.strip()
+            self._url_var.set(
+                url[:m.start(1)] + new_ip + url[m.end(1):]
+                if m else f"http://{new_ip}:8081/video"
+            )
 
-        new_ip = dlg.result.strip()
-        if not new_ip:
-            return
-
-        # Replace just the IP part in the URL, keep protocol / port / path
-        if m:
-            self._url_var.set(url[:m.start(1)] + new_ip + url[m.end(1):])
-        else:
-            self._url_var.set(f"http://{new_ip}:8081/video")
-
-    def _test_connection(self):
+    def _test_conn(self):
         url = self._url_var.get().strip()
-        if not url or "192.168.x.x" in url:
-            self._test_result.config(
-                text="Enter a real IP address first.", fg="#C0392B")
-            return
-        self._test_result.config(text="Testing…", fg=TEXT_MID)
+        self._test_lbl.config(text="Testing…", fg=TEXT_MID)
         self.update_idletasks()
 
         def _worker():
             err = _test_connection(url)
-            def _done():
-                if err:
-                    self._test_result.config(text=f"✗  {err.splitlines()[0]}", fg="#C0392B")
-                else:
-                    self._test_result.config(text="✓  Connected — ready to capture!", fg="#1E8C45")
-            self.after(0, _done)
+            self.after(0, lambda: self._test_lbl.config(
+                text="✓ Connected!" if not err else f"✗ {err.splitlines()[0]}",
+                fg="#1E8C45" if not err else "#C0392B",
+            ))
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _confirm(self):
         if self._mode.get() == "ip":
-            url = self._url_var.get().strip()
-            if not url or "192.168.x.x" in url:
-                messagebox.showwarning("Missing URL",
-                    "Please enter the actual IP address shown in your iPhone app.",
-                    parent=self)
-                return
-            self.result = url
+            self.result = self._url_var.get().strip() or config.DEFAULT_STREAM_URL
         else:
-            sel = self._listbox.curselection()
-            if not sel or not self._cameras:
-                messagebox.showwarning("No Camera",
-                    "No camera selected. Wait for scanning to finish.",
-                    parent=self)
-                return
-            self.result = self._cameras[sel[0]]
+            self.result = self._idx_var.get()
         self.destroy()
 
     def _cancel(self):
-        self.result = None
         self.destroy()
-
-    def _center(self, parent: tk.Tk):
-        px = parent.winfo_x() + parent.winfo_width()  // 2
-        py = parent.winfo_y() + parent.winfo_height() // 2
-        self.geometry(f"{self._W}x{self._H}+{px - self._W//2}+{py - self._H//2}")
 
 
 # ==================================================================

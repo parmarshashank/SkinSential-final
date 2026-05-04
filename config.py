@@ -35,7 +35,7 @@ IP_STREAM_WARMUP_FRAMES = 5
 # ── Model paths ──────────────────────────────────────────────────────
 # Relative to the directory containing app.py.
 TFLITE_MODEL_FILE  = "model_fp16.tflite"
-TF_SAVEDMODEL_DIR  = "skinsential_model"
+TF_SAVEDMODEL_FILE = "skinsential_model.keras"
 
 # ── Classes ──────────────────────────────────────────────────────────
 # Must match the output order of the model.

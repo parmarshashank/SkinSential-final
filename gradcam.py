@@ -1,23 +1,18 @@
-# Postponed annotation evaluation — makes X | None / tuple[...] work on Python 3.9.
 from __future__ import annotations
 
 """
-gradcam.py — Gradient saliency map using the TensorFlow SavedModel.
+gradcam.py — True Grad-CAM using the top_conv layer of EfficientNetB0.
 
-Keras 3 (shipped with TF ≥ 2.16) dropped support for loading legacy SavedModel
-format via keras.models.load_model().  We use tf.saved_model.load() instead,
-which works with any TF version.
+EfficientNetB0 is a nested submodel, so we can't build a single
+keras.Model that spans from the outer input to an intermediate layer
+inside the submodel (graph boundary). Fix: split into two chained models:
 
-Because tf.saved_model.load() returns a concrete inference function (not a
-layer-addressable Keras model), we compute a gradient saliency map rather than
-true Grad-CAM.  The result is visually equivalent: pixels that most influenced
-the prediction are highlighted in red/yellow.
+  conv_model : outer_input → top_conv activations
+  tail_model : top_conv activations → predictions
+                (top_bn → top_activation → gap → bn → fc1 → drop → predictions)
 
-Method: Gradient × Input saliency
-  1. Forward pass through the serving_default signature.
-  2. Compute ∂(class score) / ∂(input image) via GradientTape.
-  3. |gradient| × |input|  →  per-pixel importance.
-  4. Collapse RGB channels by mean, normalise to [0,1], overlay with JET colormap.
+GradientTape watches conv_outputs between the two models, giving true
+Grad-CAM gradients.
 """
 
 import threading
@@ -27,22 +22,60 @@ from PIL import Image
 
 
 class GradCAMExplainer:
-    """Gradient saliency explainer backed by a TF SavedModel."""
+    """True Grad-CAM explainer backed by a Keras .keras model."""
 
     def __init__(self, model_path: str):
         import tensorflow as tf
+        from tensorflow import keras
 
         self._tf   = tf
         self._lock = threading.Lock()
 
-        # Load SavedModel — works with Keras 3 / TF 2.16+
-        self._sm    = tf.saved_model.load(model_path)
-        self._infer = self._sm.signatures["serving_default"]
+        full_model = keras.models.load_model(model_path)
+        self._build_grad_models(full_model)
 
-        # Discover the input / output tensor keys from the signature.
-        self._in_key  = list(self._infer.structured_input_signature[1].keys())[0]
-        dummy_out     = self._infer(**{self._in_key: tf.zeros([1, 224, 224, 3])})
-        self._out_key = list(dummy_out.keys())[0]
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
+
+    def _build_grad_models(self, full_model):
+        from tensorflow import keras
+
+        try:
+            # Nested model (correct build): EfficientNetB0 is a submodel
+            base      = full_model.get_layer("efficientnetb0")
+            last_conv = base.get_layer("top_conv")
+
+            # conv_model: base's own input → top_conv output
+            # (base.inputs accepts the same raw [0,255] as the outer model)
+            self._conv_model = keras.Model(
+                inputs=base.inputs,
+                outputs=last_conv.output,
+            )
+
+            # tail_model: top_conv output → predictions
+            # Re-uses the trained weight tensors from base + outer head layers
+            conv_out_shape = self._conv_model.output_shape[1:]   # (H, W, C)
+            x = tail_in = keras.Input(shape=conv_out_shape)
+            x = base.get_layer("top_bn")(x)
+            x = base.get_layer("top_activation")(x)
+            x = full_model.get_layer("gap")(x)
+            x = full_model.get_layer("bn")(x)
+            x = full_model.get_layer("fc1")(x)
+            x = full_model.get_layer("drop")(x)
+            x = full_model.get_layer("predictions")(x)
+            self._tail_model = keras.Model(tail_in, x)
+
+            self._nested = True
+
+        except ValueError:
+            # Flat model (old build via input_tensor=): top_conv is directly accessible
+            last_conv = full_model.get_layer("top_conv")
+            self._flat_grad_model = keras.Model(
+                inputs=full_model.inputs,
+                outputs=[last_conv.output, full_model.output],
+            )
+            self._nested = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -56,57 +89,50 @@ class GradCAMExplainer:
         alpha: float = 0.45,
     ) -> Image.Image:
         """
-        Compute a gradient saliency map and return it overlaid on original_image.
+        Compute Grad-CAM and return it overlaid on original_image.
 
         Args:
-            input_array    : np.ndarray  (1, 224, 224, 3) float32  preprocessed
+            input_array    : np.ndarray  (1, 224, 224, 3) float32  raw [0, 255]
             class_idx      : int  predicted class index
-            original_image : PIL.Image  original (un-preprocessed) image
-            alpha          : heatmap blend weight (0 = invisible, 1 = only heatmap)
+            original_image : PIL.Image  original image at any resolution
+            alpha          : heatmap blend weight
 
         Returns:
-            PIL.Image with saliency overlay at original resolution
+            PIL.Image with Grad-CAM overlay at original_image's resolution
         """
         with self._lock:
-            heatmap = self._compute_saliency(input_array, class_idx)
+            heatmap = self._compute_gradcam(input_array, class_idx)
         return self._overlay(heatmap, original_image, alpha)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _compute_saliency(self, input_array: np.ndarray, class_idx: int) -> np.ndarray:
-        """Return a float32 saliency map in [0, 1] at 224×224 resolution."""
-        tf = self._tf
+    def _compute_gradcam(self, input_array: np.ndarray, class_idx: int) -> np.ndarray:
+        tf  = self._tf
+        img = tf.constant(input_array.astype(np.float32))
 
-        # tf.Variable is automatically watched by GradientTape.
-        input_var = tf.Variable(input_array.astype(np.float32))
+        if self._nested:
+            with tf.GradientTape() as tape:
+                # Step 1: input → top_conv activations
+                conv_outputs = self._conv_model(img, training=False)
+                tape.watch(conv_outputs)
+                # Step 2: top_conv activations → predictions
+                predictions  = self._tail_model(conv_outputs, training=False)
+                class_score  = predictions[:, class_idx]
+        else:
+            with tf.GradientTape() as tape:
+                conv_outputs, predictions = self._flat_grad_model(
+                    [img], training=False)
+                tape.watch(conv_outputs)
+                class_score = predictions[:, class_idx]
 
-        with tf.GradientTape() as tape:
-            outputs = self._infer(**{self._in_key: input_var})
-            preds   = outputs[self._out_key]
-            loss    = preds[:, class_idx]
-
-        grads = tape.gradient(loss, input_var)   # (1, 224, 224, 3)
-
-        if grads is None:
-            raise RuntimeError(
-                "Gradient computation returned None — the model's serving_default "
-                "signature may not be differentiable with GradientTape.  "
-                "Try a different call_endpoint."
-            )
-
-        # Gradient × Input: highlights where the gradient AND the activation are both large.
-        grad_input = tf.abs(grads[0] * input_var[0]).numpy()   # (224, 224, 3)
-        saliency   = np.mean(grad_input, axis=-1)               # (224, 224)
-
-        # Normalise to [0, 1]
-        saliency = np.maximum(saliency, 0)
-        max_val  = saliency.max()
-        if max_val > 1e-8:
-            saliency /= max_val
-
-        return saliency.astype(np.float32)
+        grads   = tape.gradient(class_score, conv_outputs)  # (1, H, W, C)
+        pooled  = tf.reduce_mean(grads, axis=(0, 1, 2))     # (C,)
+        heatmap = tf.reduce_sum(conv_outputs[0] * pooled, axis=-1)  # (H, W)
+        heatmap = tf.maximum(heatmap, 0)
+        heatmap = (heatmap / (tf.reduce_max(heatmap) + 1e-8)).numpy()
+        return heatmap.astype(np.float32)
 
     def _overlay(
         self,
@@ -114,14 +140,10 @@ class GradCAMExplainer:
         original_image: Image.Image,
         alpha: float,
     ) -> Image.Image:
-        """Resize heatmap to original_image size and blend with JET colormap."""
-        orig_w, orig_h  = original_image.size
-        heatmap_resized = cv2.resize(heatmap, (orig_w, orig_h))
-        heatmap_uint8   = np.uint8(255 * heatmap_resized)
-        heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
-        heatmap_rgb     = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
-
-        orig_array = np.array(original_image, dtype=np.uint8)
-        overlay    = cv2.addWeighted(orig_array, 1.0 - alpha, heatmap_rgb, alpha, 0)
-
+        orig_w, orig_h = original_image.size
+        hm = cv2.resize(heatmap, (orig_w, orig_h))
+        hm = cv2.applyColorMap(np.uint8(255 * hm), cv2.COLORMAP_JET)
+        hm = cv2.cvtColor(hm, cv2.COLOR_BGR2RGB)
+        orig_array = np.array(original_image.convert("RGB"), dtype=np.uint8)
+        overlay    = cv2.addWeighted(orig_array, 1.0 - alpha, hm, alpha, 0)
         return Image.fromarray(overlay)
