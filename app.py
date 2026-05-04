@@ -545,6 +545,92 @@ def _capture_frame(source) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
 
+class _NumpadDialog(tk.Toplevel):
+    """
+    Touch-friendly numpad for entering an IP address on Pi's touchscreen.
+    Opens as a modal popup with large buttons (0-9, dot, backspace, clear).
+    """
+
+    _W, _H = 320, 380
+
+    def __init__(self, parent, prefill: str = ""):
+        super().__init__(parent)
+        self.title("Enter IP Address")
+        self.geometry(f"{self._W}x{self._H}")
+        self.resizable(False, False)
+        self.configure(bg=BG)
+        self.result = None
+
+        self._val = tk.StringVar(value=prefill)
+        self._build()
+
+        # Center over parent
+        px = parent.winfo_x() + parent.winfo_width()  // 2
+        py = parent.winfo_y() + parent.winfo_height() // 2
+        self.geometry(f"{self._W}x{self._H}+{px - self._W//2}+{py - self._H//2}")
+
+        self.update_idletasks()
+        try:
+            self.wait_visibility()
+            self.grab_set()
+        except tk.TclError:
+            pass
+
+    def _build(self):
+        # Display
+        disp_frame = tk.Frame(self, bg=ACCENT_LINE, bd=1)
+        disp_frame.pack(fill="x", padx=16, pady=(14, 8))
+        tk.Label(disp_frame, textvariable=self._val,
+                 font=("Courier", 16, "bold"),
+                 bg=CARD_BG, fg=TEXT_DARK, anchor="e", padx=8, pady=8,
+        ).pack(fill="x", padx=1, pady=1)
+
+        # Key grid: 7 8 9 / 4 5 6 / 1 2 3 / . 0 ⌫ / [Clear] [OK]
+        grid = tk.Frame(self, bg=BG)
+        grid.pack(padx=16, pady=(0, 10), fill="both", expand=True)
+
+        ROWS = [
+            ["7", "8", "9"],
+            ["4", "5", "6"],
+            ["1", "2", "3"],
+            [".", "0", "⌫"],
+        ]
+        for r, row in enumerate(ROWS):
+            for c, key in enumerate(row):
+                cmd = (lambda k=key: self._backspace()) if key == "⌫" \
+                      else (lambda k=key: self._press(k))
+                bg = "#D0D8E8" if key == "⌫" else CARD_BG
+                btn = tk.Label(grid, text=key, font=("Helvetica", 18, "bold"),
+                               bg=bg, fg=TEXT_DARK, relief="flat",
+                               cursor="hand2", pady=0)
+                btn.grid(row=r, column=c, padx=3, pady=3, sticky="nsew")
+                btn.bind("<Button-1>", lambda _, fn=cmd: fn())
+            grid.rowconfigure(r, weight=1)
+        for c in range(3):
+            grid.columnconfigure(c, weight=1)
+
+        # Bottom buttons
+        bot = tk.Frame(self, bg=BG)
+        bot.pack(fill="x", padx=16, pady=(0, 14))
+        _ColorButton(bot, "Clear", self._clear, BTN_GREY,
+                     padx=16, pady=8).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        _ColorButton(bot, "  OK  ", self._confirm, BTN_GREEN,
+                     padx=16, pady=8).pack(side="left", expand=True, fill="x", padx=(4, 0))
+
+    def _press(self, key: str):
+        self._val.set(self._val.get() + key)
+
+    def _backspace(self):
+        self._val.set(self._val.get()[:-1])
+
+    def _clear(self):
+        self._val.set("")
+
+    def _confirm(self):
+        self.result = self._val.get()
+        self.destroy()
+
+
 class _CameraDialog(tk.Toplevel):
     """
     Full-size camera picker with two panels:
@@ -673,8 +759,11 @@ class _CameraDialog(tk.Toplevel):
                  font=("Helvetica", 11), bg=BG, fg=TEXT_DARK
         ).pack(anchor="w", pady=(0, 6))
 
-        entry_frame = tk.Frame(f, bg=ACCENT_LINE, bd=1, relief="flat")
-        entry_frame.pack(fill="x")
+        entry_row = tk.Frame(f, bg=BG)
+        entry_row.pack(fill="x")
+
+        entry_frame = tk.Frame(entry_row, bg=ACCENT_LINE, bd=1, relief="flat")
+        entry_frame.pack(side="left", fill="x", expand=True)
 
         self._url_entry = tk.Entry(
             entry_frame, textvariable=self._url_var,
@@ -682,6 +771,11 @@ class _CameraDialog(tk.Toplevel):
             bg=CARD_BG, fg=TEXT_DARK, insertbackground=TEXT_DARK,
         )
         self._url_entry.pack(fill="x")
+
+        # Numpad button — tap to type IP without a physical keyboard (Pi touchscreen)
+        _ColorButton(entry_row, "  IP  ", self._open_numpad, BTN_BLUE,
+                     font=("Helvetica", 11, "bold"), padx=10, pady=6,
+        ).pack(side="left", padx=(6, 0))
 
         # Format hint
         tk.Label(f,
@@ -754,6 +848,29 @@ class _CameraDialog(tk.Toplevel):
 
         self._listbox.selection_set(0)
         self._listbox.activate(0)
+
+    def _open_numpad(self):
+        """Open the IP numpad — lets Pi touchscreen users type an IP address."""
+        # Extract current IP from URL to pre-fill
+        import re
+        url = self._url_var.get()
+        m = re.search(r"://([0-9.]+)", url)
+        current_ip = m.group(1) if m else ""
+
+        dlg = _NumpadDialog(self, current_ip)
+        self.wait_window(dlg)
+        if dlg.result is None:
+            return
+
+        new_ip = dlg.result.strip()
+        if not new_ip:
+            return
+
+        # Replace just the IP part in the URL, keep protocol / port / path
+        if m:
+            self._url_var.set(url[:m.start(1)] + new_ip + url[m.end(1):])
+        else:
+            self._url_var.set(f"http://{new_ip}:8081/video")
 
     def _test_connection(self):
         url = self._url_var.get().strip()

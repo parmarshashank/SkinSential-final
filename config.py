@@ -26,7 +26,7 @@ DEFAULT_CAMERA_INDEX = 0
 #   EpocCam        : http://192.168.x.x:1900/live
 #   DroidCam       : http://192.168.x.x:4747/video
 #   RTSP (generic) : rtsp://192.168.x.x:8554/stream
-DEFAULT_STREAM_URL = "http://100.100.0.122:8081/video"
+DEFAULT_STREAM_URL = "http://10.42.0.20:8081/video"
 
 # Number of warm-up frames to read from an IP stream before grabbing.
 # Increase if the first captured frame is dark / blurry.
