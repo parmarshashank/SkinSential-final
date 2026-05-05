@@ -20,9 +20,7 @@ import numpy as np
 import cv2
 from PIL import Image
 
-
 class GradCAMExplainer:
-    """True Grad-CAM explainer backed by a Keras .keras model."""
 
     def __init__(self, model_path: str):
         import tensorflow as tf
@@ -34,28 +32,20 @@ class GradCAMExplainer:
         full_model = keras.models.load_model(model_path)
         self._build_grad_models(full_model)
 
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
-
     def _build_grad_models(self, full_model):
         from tensorflow import keras
 
         try:
-            # Nested model (correct build): EfficientNetB0 is a submodel
+
             base      = full_model.get_layer("efficientnetb0")
             last_conv = base.get_layer("top_conv")
 
-            # conv_model: base's own input → top_conv output
-            # (base.inputs accepts the same raw [0,255] as the outer model)
             self._conv_model = keras.Model(
                 inputs=base.inputs,
                 outputs=last_conv.output,
             )
 
-            # tail_model: top_conv output → predictions
-            # Re-uses the trained weight tensors from base + outer head layers
-            conv_out_shape = self._conv_model.output_shape[1:]   # (H, W, C)
+            conv_out_shape = self._conv_model.output_shape[1:]
             x = tail_in = keras.Input(shape=conv_out_shape)
             x = base.get_layer("top_bn")(x)
             x = base.get_layer("top_activation")(x)
@@ -69,17 +59,13 @@ class GradCAMExplainer:
             self._nested = True
 
         except ValueError:
-            # Flat model (old build via input_tensor=): top_conv is directly accessible
+
             last_conv = full_model.get_layer("top_conv")
             self._flat_grad_model = keras.Model(
                 inputs=full_model.inputs,
                 outputs=[last_conv.output, full_model.output],
             )
             self._nested = False
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def explain(
         self,
@@ -88,25 +74,10 @@ class GradCAMExplainer:
         original_image: Image.Image,
         alpha: float = 0.45,
     ) -> Image.Image:
-        """
-        Compute Grad-CAM and return it overlaid on original_image.
 
-        Args:
-            input_array    : np.ndarray  (1, 224, 224, 3) float32  raw [0, 255]
-            class_idx      : int  predicted class index
-            original_image : PIL.Image  original image at any resolution
-            alpha          : heatmap blend weight
-
-        Returns:
-            PIL.Image with Grad-CAM overlay at original_image's resolution
-        """
         with self._lock:
             heatmap = self._compute_gradcam(input_array, class_idx)
         return self._overlay(heatmap, original_image, alpha)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _compute_gradcam(self, input_array: np.ndarray, class_idx: int) -> np.ndarray:
         tf  = self._tf
@@ -114,10 +85,10 @@ class GradCAMExplainer:
 
         if self._nested:
             with tf.GradientTape() as tape:
-                # Step 1: input → top_conv activations
+
                 conv_outputs = self._conv_model(img, training=False)
                 tape.watch(conv_outputs)
-                # Step 2: top_conv activations → predictions
+
                 predictions  = self._tail_model(conv_outputs, training=False)
                 class_score  = predictions[:, class_idx]
         else:
@@ -127,9 +98,9 @@ class GradCAMExplainer:
                 tape.watch(conv_outputs)
                 class_score = predictions[:, class_idx]
 
-        grads   = tape.gradient(class_score, conv_outputs)  # (1, H, W, C)
-        pooled  = tf.reduce_mean(grads, axis=(0, 1, 2))     # (C,)
-        heatmap = tf.reduce_sum(conv_outputs[0] * pooled, axis=-1)  # (H, W)
+        grads   = tape.gradient(class_score, conv_outputs)
+        pooled  = tf.reduce_mean(grads, axis=(0, 1, 2))
+        heatmap = tf.reduce_sum(conv_outputs[0] * pooled, axis=-1)
         heatmap = tf.maximum(heatmap, 0)
         heatmap = (heatmap / (tf.reduce_max(heatmap) + 1e-8)).numpy()
         return heatmap.astype(np.float32)

@@ -1,4 +1,3 @@
-# Postponed annotation evaluation — makes X | None / tuple[...] work on Python 3.9.
 from __future__ import annotations
 
 """
@@ -40,16 +39,10 @@ from gradcam import GradCAMExplainer
 from utils import preprocess_image, resize_for_display
 import config
 
-# ------------------------------------------------------------------
-# Paths  (resolved from config)
-# ------------------------------------------------------------------
 _DIR          = os.path.dirname(os.path.abspath(__file__))
 TFLITE_MODEL  = os.path.join(_DIR, config.TFLITE_MODEL_FILE)
 TF_SAVEDMODEL = os.path.join(_DIR, config.TF_SAVEDMODEL_FILE)
 
-# ------------------------------------------------------------------
-# Palette  (works on Aqua/macOS + Raspbian — Label-based buttons)
-# ------------------------------------------------------------------
 BG          = "#F0F2F5"
 CARD_BG     = "#FFFFFF"
 IMG_BG      = "#D8DCE4"
@@ -58,10 +51,10 @@ TEXT_MID    = "#4A4A6A"
 TEXT_LIGHT  = "#9A9AB0"
 ACCENT_LINE = "#C8CDD8"
 
-BTN_BLUE   = "#1A73E8"   # Capture
-BTN_GREEN  = "#1E8C45"   # Predict
-BTN_ORANGE = "#C0392B"   # Explain
-BTN_GREY   = "#4A5568"   # Upload
+BTN_BLUE   = "#1A73E8"
+BTN_GREEN  = "#1E8C45"
+BTN_ORANGE = "#C0392B"
+BTN_GREY   = "#4A5568"
 BTN_FG     = "#FFFFFF"
 
 FONT_TITLE  = ("Helvetica", 18, "bold")
@@ -75,8 +68,6 @@ FONT_STATUS = ("Helvetica", 9)
 MIN_W, MIN_H = 420, 560
 DEF_W, DEF_H = 520, 700
 
-
-# ==================================================================
 class SkinClassifierApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -90,17 +81,11 @@ class SkinClassifierApp:
         self._load_tflite()
         self._gradcam: GradCAMExplainer | None = None
 
-        # Camera source: int (local device) or str (IP/RTSP URL).
-        # Auto-selected at startup — local camera 0 if available, else IP stream.
         self._camera_source = self._detect_default_source()
 
         self._build_ui()
         self._refresh_source_label()
         self._set_status("Ready — load an image to begin.")
-
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
 
     def _configure_window(self):
         self.root.title("Skin Disease Classifier")
@@ -118,7 +103,7 @@ class SkinClassifierApp:
             raise SystemExit(1) from exc
 
     def _detect_default_source(self):
-        """Use local camera 0 if available, otherwise fall back to IP stream."""
+
         cap = cv2.VideoCapture(0)
         if cap.isOpened():
             cap.release()
@@ -142,18 +127,12 @@ class SkinClassifierApp:
             self._gradcam = GradCAMExplainer(TF_SAVEDMODEL)
         return self._gradcam
 
-    # ------------------------------------------------------------------
-    # UI — responsive grid
-    # ------------------------------------------------------------------
-
     def _build_ui(self):
         root = self.root
 
-        # Grid: column 0 fills width; row 2 (preview) fills leftover height
         root.columnconfigure(0, weight=1)
-        root.rowconfigure(2, weight=1)   # image preview row
+        root.rowconfigure(2, weight=1)
 
-        # ── Row 0: title ───────────────────────────────────────────────
         tk.Label(root, text="Skin Disease Classifier",
                  font=FONT_TITLE, bg=BG, fg=TEXT_DARK
         ).grid(row=0, column=0, pady=(16, 2))
@@ -162,7 +141,6 @@ class SkinClassifierApp:
                  font=FONT_SUB, bg=BG, fg=TEXT_LIGHT
         ).grid(row=1, column=0, pady=(0, 8))
 
-        # ── Row 2: image preview (expands) ─────────────────────────────
         preview_border = tk.Frame(root, bg=ACCENT_LINE)
         preview_border.grid(row=2, column=0, padx=24, pady=(0, 8),
                             sticky="nsew")
@@ -181,10 +159,8 @@ class SkinClassifierApp:
         )
         self._img_label.grid(row=0, column=0, sticky="nsew")
 
-        # Redraw image whenever the preview frame is resized
         self._preview_frame.bind("<Configure>", self._on_preview_resize)
 
-        # ── Row 3: Source bar ──────────────────────────────────────────
         src_bar = tk.Frame(root, bg="#E2E6EF")
         src_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 4))
 
@@ -199,7 +175,6 @@ class SkinClassifierApp:
                      padx=10, pady=4,
         ).pack(side="right", padx=4, pady=3)
 
-        # ── Row 4: Capture / Upload ────────────────────────────────────
         btn_row = tk.Frame(root, bg=BG)
         btn_row.grid(row=4, column=0, pady=(0, 6))
 
@@ -211,14 +186,12 @@ class SkinClassifierApp:
             btn_row, "Upload Image", self.upload_image, BTN_GREY)
         self._btn_upload.pack(side="left", padx=8)
 
-        # ── Row 5: Predict ─────────────────────────────────────────────
         self._btn_predict = _ColorButton(
             root, "        Predict        ", self.predict, BTN_GREEN,
             font=("Helvetica", 13, "bold"), padx=36, pady=10)
         self._btn_predict.grid(row=5, column=0, pady=(0, 8))
         self._btn_predict.set_enabled(False)
 
-        # ── Row 6: Result card ─────────────────────────────────────────
         result_border = tk.Frame(root, bg=ACCENT_LINE)
         result_border.grid(row=6, column=0, padx=24, pady=(0, 8), sticky="ew")
 
@@ -237,25 +210,19 @@ class SkinClassifierApp:
             font=FONT_CONF, bg=CARD_BG, fg=TEXT_MID, anchor="e")
         self._lbl_confidence.grid(row=0, column=1, sticky="e")
 
-        # ── Row 7: Explain ─────────────────────────────────────────────
         self._btn_explain = _ColorButton(
             root, "Explain (Grad-CAM)", self.explain, BTN_ORANGE)
         self._btn_explain.grid(row=7, column=0, pady=(0, 4))
         self._btn_explain.set_enabled(False)
 
-        # ── Row 8: Status bar ──────────────────────────────────────────
         self._status_var = tk.StringVar()
         tk.Label(root, textvariable=self._status_var,
                  font=FONT_STATUS, bg="#C8CDD8", fg=TEXT_MID,
                  anchor="w", padx=10, pady=4
         ).grid(row=8, column=0, sticky="ew")
 
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
-
     def capture_image(self):
-        """Capture directly from the current camera source — no dialog."""
+
         source = self._camera_source
         label  = self._source_label()
         self._set_status(f"Capturing from {label}…")
@@ -277,7 +244,7 @@ class SkinClassifierApp:
         threading.Thread(target=_worker, daemon=True).start()
 
     def _open_camera_settings(self):
-        """Open the camera source picker dialog."""
+
         dlg = _CameraSettingsDialog(self.root, self._camera_source)
         self.root.wait_window(dlg)
         if dlg.result is not None:
@@ -335,10 +302,6 @@ class SkinClassifierApp:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _load_pil(self, pil: Image.Image):
         self.current_image  = pil
         self.input_array, _ = preprocess_image(pil)
@@ -369,13 +332,8 @@ class SkinClassifierApp:
         self._status_var.set(f"  {msg}")
         self.root.update_idletasks()
 
-
-# ==================================================================
-# Camera helpers
-# ==================================================================
-
 def _scan_cameras(max_idx: int = 6) -> list[int]:
-    """Return indices of all openable local camera devices."""
+
     found = []
     for i in range(max_idx):
         cap = cv2.VideoCapture(i)
@@ -384,9 +342,8 @@ def _scan_cameras(max_idx: int = 6) -> list[int]:
             cap.release()
     return found
 
-
 def _url_error_message(url: str, exc: Exception) -> str:
-    """Turn a network exception into a plain-English hint."""
+
     import urllib.error
     reason = ""
     if hasattr(exc, "reason"):
@@ -409,12 +366,8 @@ def _url_error_message(url: str, exc: Exception) -> str:
         return "Hostname not found — paste an IP address (e.g. 192.168.1.42), not a name."
     return f"Network error: {exc}"
 
-
 def _grab_mjpeg_frame(url: str, timeout: int = 8) -> Image.Image:
-    """
-    Read just enough of an HTTP MJPEG stream to extract one JPEG frame.
-    More reliable than cv2.VideoCapture for HTTP streams on macOS.
-    """
+
     import urllib.request
 
     import urllib.error
@@ -434,7 +387,7 @@ def _grab_mjpeg_frame(url: str, timeout: int = 8) -> Image.Image:
 
     with stream_ctx as stream:
         buf = b""
-        # Read up to 2 MB looking for a complete JPEG (SOI … EOI)
+
         for _ in range(512):
             buf += stream.read(4096)
             s = buf.find(b"\xff\xd8")
@@ -450,9 +403,8 @@ def _grab_mjpeg_frame(url: str, timeout: int = 8) -> Image.Image:
         "→ Make sure the app is actively streaming video."
     )
 
-
 def _fetch_snapshot(url: str, timeout: int = 6) -> Image.Image:
-    """Fetch a single JPEG via HTTP GET and decode it."""
+
     import urllib.request
     import urllib.error
     import socket
@@ -476,7 +428,7 @@ def _fetch_snapshot(url: str, timeout: int = 6) -> Image.Image:
     arr   = np.frombuffer(data, dtype=np.uint8)
     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if frame is None:
-        # Maybe it's a live MJPEG stream disguised as a plain URL — try parsing it
+
         try:
             return _grab_mjpeg_frame(url, timeout=timeout)
         except Exception:
@@ -487,18 +439,14 @@ def _fetch_snapshot(url: str, timeout: int = 6) -> Image.Image:
         )
     return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-
 def _test_connection(url: str, timeout: int = 6) -> str:
-    """
-    Non-destructive reachability check.
-    Returns '' on success, or a plain-English error string on failure.
-    """
+
     import urllib.request
     import urllib.error
     import socket
 
     try:
-        # Just open the connection and read the first chunk — don't decode.
+
         req = urllib.request.Request(url, headers={"Connection": "close"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             resp.read(256)
@@ -508,32 +456,22 @@ def _test_connection(url: str, timeout: int = 6) -> str:
     except Exception as exc:
         return str(exc)
 
-
 def _capture_frame(source) -> Image.Image:
-    """
-    Grab one frame from source (int device index or str URL).
 
-    Auto-detects the URL type:
-      • http://…/….jpg  →  single JPEG snapshot (fastest)
-      • http://…        →  HTTP MJPEG stream  (parses first JPEG frame)
-      • rtsp://…        →  RTSP via cv2.VideoCapture + CAP_FFMPEG
-      • int             →  local webcam device index
-    """
     import urllib.error, socket
 
     if isinstance(source, str):
         url_lower = source.lower().split("?")[0]
 
-        # ── RTSP ─────────────────────────────────────────────────────
         if url_lower.startswith("rtsp://"):
-            # Try backends in order — conda OpenCV may lack FFmpeg RTSP support
+
             for backend in (cv2.CAP_FFMPEG, cv2.CAP_GSTREAMER, cv2.CAP_ANY):
                 cap = cv2.VideoCapture(source, backend)
                 if cap.isOpened():
                     break
                 cap.release()
             else:
-                # Last resort: convert rtsp:// → http:// and try MJPEG parser
+
                 http_url = "http://" + source[len("rtsp://"):]
                 try:
                     return _grab_mjpeg_frame(http_url)
@@ -556,11 +494,10 @@ def _capture_frame(source) -> Image.Image:
                 raise RuntimeError("RTSP stream opened but no frame received.")
             return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-        # ── HTTP snapshot or MJPEG ────────────────────────────────────
         if url_lower.startswith("http://") or url_lower.startswith("https://"):
             if url_lower.endswith((".jpg", ".jpeg")):
                 return _fetch_snapshot(source)
-            # Generic HTTP — try MJPEG parser first (works for /live, /video, etc.)
+
             try:
                 return _grab_mjpeg_frame(source)
             except RuntimeError:
@@ -573,12 +510,11 @@ def _capture_frame(source) -> Image.Image:
             "Supported: http://, https://, rtsp://"
         )
 
-    # ── Local device ─────────────────────────────────────────────────
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open local camera device {source}.")
     try:
-        cap.read()  # discard first frame (auto-exposure)
+        cap.read()
         ret, frame = cap.read()
     finally:
         cap.release()
@@ -586,12 +522,7 @@ def _capture_frame(source) -> Image.Image:
         raise RuntimeError(f"Camera {source} opened but no frame received.")
     return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-
 class _NumpadDialog(tk.Toplevel):
-    """
-    Touch-friendly numpad for entering an IP address on Pi's touchscreen.
-    Opens as a modal popup with large buttons (0-9, dot, backspace, clear).
-    """
 
     _W, _H = 320, 380
 
@@ -606,7 +537,6 @@ class _NumpadDialog(tk.Toplevel):
         self._val = tk.StringVar(value=prefill)
         self._build()
 
-        # Center over parent
         px = parent.winfo_x() + parent.winfo_width()  // 2
         py = parent.winfo_y() + parent.winfo_height() // 2
         self.geometry(f"{self._W}x{self._H}+{px - self._W//2}+{py - self._H//2}")
@@ -619,7 +549,7 @@ class _NumpadDialog(tk.Toplevel):
             pass
 
     def _build(self):
-        # Display
+
         disp_frame = tk.Frame(self, bg=ACCENT_LINE, bd=1)
         disp_frame.pack(fill="x", padx=16, pady=(14, 8))
         tk.Label(disp_frame, textvariable=self._val,
@@ -627,7 +557,6 @@ class _NumpadDialog(tk.Toplevel):
                  bg=CARD_BG, fg=TEXT_DARK, anchor="e", padx=8, pady=8,
         ).pack(fill="x", padx=1, pady=1)
 
-        # Key grid: 7 8 9 / 4 5 6 / 1 2 3 / . 0 ⌫ / [Clear] [OK]
         grid = tk.Frame(self, bg=BG)
         grid.pack(padx=16, pady=(0, 10), fill="both", expand=True)
 
@@ -651,7 +580,6 @@ class _NumpadDialog(tk.Toplevel):
         for c in range(3):
             grid.columnconfigure(c, weight=1)
 
-        # Bottom buttons
         bot = tk.Frame(self, bg=BG)
         bot.pack(fill="x", padx=16, pady=(0, 14))
         _ColorButton(bot, "Clear", self._clear, BTN_GREY,
@@ -672,13 +600,7 @@ class _NumpadDialog(tk.Toplevel):
         self.result = self._val.get()
         self.destroy()
 
-
 class _CameraSettingsDialog(tk.Toplevel):
-    """
-    Simple camera settings dialog — flat single view, no tabs.
-    Shows detected local cameras in a dropdown + IP stream URL field.
-    Pre-selects the currently active source.
-    """
 
     _W, _H = 480, 360
 
@@ -711,7 +633,6 @@ class _CameraSettingsDialog(tk.Toplevel):
 
         threading.Thread(target=self._do_scan, daemon=True).start()
 
-    # ------------------------------------------------------------------
     def _build(self):
         tk.Label(self, text="Camera Settings",
                  font=("Helvetica", 13, "bold"), bg=BG, fg=TEXT_DARK,
@@ -722,7 +643,6 @@ class _CameraSettingsDialog(tk.Toplevel):
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # ── Local cameras ──────────────────────────────────────────────
         local_row = tk.Frame(body, bg=BG)
         local_row.pack(fill="x", pady=(0, 6))
 
@@ -740,7 +660,6 @@ class _CameraSettingsDialog(tk.Toplevel):
                               highlightbackground=ACCENT_LINE)
         self._cam_menu.pack(side="left", padx=(8, 0))
 
-        # ── IP stream ──────────────────────────────────────────────────
         tk.Frame(body, bg=ACCENT_LINE, height=1).pack(fill="x", pady=8)
 
         ip_row = tk.Frame(body, bg=BG)
@@ -768,7 +687,6 @@ class _CameraSettingsDialog(tk.Toplevel):
                      font=("Helvetica", 10, "bold"), padx=10, pady=5,
         ).pack(side="left", padx=(6, 0))
 
-        # Test
         test_row = tk.Frame(body, bg=BG)
         test_row.pack(fill="x", pady=(8, 0))
 
@@ -781,7 +699,6 @@ class _CameraSettingsDialog(tk.Toplevel):
                                   wraplength=280, justify="left")
         self._test_lbl.pack(side="left", padx=(10, 0))
 
-        # ── Bottom buttons ─────────────────────────────────────────────
         tk.Frame(self, bg=ACCENT_LINE, height=1).pack(fill="x", padx=20)
         bar = tk.Frame(self, bg=BG, pady=10)
         bar.pack(fill="x")
@@ -822,7 +739,7 @@ class _CameraSettingsDialog(tk.Toplevel):
                                                            self._cam_menu_var.set(l)))
 
         first = self._cameras[0]
-        # Pre-select matching camera if current source is local
+
         if isinstance(self._current, int) and self._current in self._cameras:
             first = self._current
         label = NAMES.get(first, f"Camera {first} (external)")
@@ -866,14 +783,7 @@ class _CameraSettingsDialog(tk.Toplevel):
     def _cancel(self):
         self.destroy()
 
-
-# ==================================================================
-# _ColorButton — Label-based button that renders correctly on macOS
-# (tk.Button ignores bg/fg on Aqua; tk.Label always respects them)
-# ==================================================================
-
 class _ColorButton(tk.Frame):
-    """A clickable Label that looks and behaves like a coloured button."""
 
     def __init__(self, parent, text: str, command, bg: str,
                  fg: str = BTN_FG, font=FONT_BTN,
@@ -896,7 +806,6 @@ class _ColorButton(tk.Frame):
             w.bind("<Enter>",    self._on_enter)
             w.bind("<Leave>",    self._on_leave)
 
-    # --- public interface matches tk.Button.config(state=...) ---------
     def set_enabled(self, enabled: bool):
         self._enabled = enabled
         if enabled:
@@ -907,7 +816,6 @@ class _ColorButton(tk.Frame):
             self._lbl.config(bg=disabled_bg, fg="#E0E0E0", cursor="")
             self.config(bg=disabled_bg, cursor="")
 
-    # --- event handlers -----------------------------------------------
     def _on_click(self, _event=None):
         if self._enabled:
             self._cmd()
@@ -922,23 +830,16 @@ class _ColorButton(tk.Frame):
             self._lbl.config(bg=self._bg)
             self.config(bg=self._bg)
 
-
 def _darken(hex_color: str, factor: float) -> str:
     r = max(0, int(int(hex_color[1:3], 16) * factor))
     g = max(0, int(int(hex_color[3:5], 16) * factor))
     b = max(0, int(int(hex_color[5:7], 16) * factor))
     return f"#{r:02x}{g:02x}{b:02x}"
 
-
-# ------------------------------------------------------------------
-# Entry point
-# ------------------------------------------------------------------
-
 def main():
     root = tk.Tk()
     SkinClassifierApp(root)
     root.mainloop()
-
 
 if __name__ == "__main__":
     main()

@@ -1,16 +1,3 @@
-"""
-diagnose.py — Run this ONCE to figure out the correct preprocessing.
-
-Usage:
-    python diagnose.py                         # uses a synthetic test image
-    python diagnose.py path/to/skin_image.jpg  # uses a real image (recommended)
-
-Prints:
-  • TFLite model input/output metadata
-  • Raw logits + probabilities for every normalization mode
-  • Which mode gives the most spread-out (confident + varied) predictions
-"""
-
 import sys
 import numpy as np
 from PIL import Image
@@ -19,12 +6,11 @@ TFLITE_MODEL = "model_fp16.tflite"
 CLASSES      = ["melanoma", "psoriasis", "ringworm", "normal"]
 INPUT_SIZE   = (224, 224)
 
-# ── Load image ────────────────────────────────────────────────────────
 if len(sys.argv) > 1:
     img = Image.open(sys.argv[1]).convert("RGB")
     print(f"Using image: {sys.argv[1]}")
 else:
-    # Synthetic skin-tone patch — better than all-black or all-white
+
     rng = np.random.default_rng(42)
     fake = rng.integers(100, 220, size=(224, 224, 3), dtype=np.uint8)
     img = Image.fromarray(fake)
@@ -34,7 +20,6 @@ else:
 
 arr_uint8 = np.array(img.resize(INPUT_SIZE, Image.LANCZOS), dtype=np.uint8)
 
-# ── Load TFLite interpreter ───────────────────────────────────────────
 try:
     import tflite_runtime.interpreter as tflite
     Interpreter = tflite.Interpreter
@@ -67,7 +52,6 @@ print(f"  dtype     : {out_detail['dtype']}")
 quant_out = out_detail.get("quantization", (0.0, 0))
 print(f"  quant     : scale={quant_out[0]:.6f}, zero_point={quant_out[1]}")
 
-# ── Normalization modes to test ───────────────────────────────────────
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -93,7 +77,6 @@ def run(arr_f32):
 def softmax(x):
     e = np.exp(x - x.max()); return e / e.sum()
 
-# ── Run every mode and print results ─────────────────────────────────
 print("\n" + "="*60)
 print("Results for each normalization mode")
 print("="*60)
@@ -111,7 +94,6 @@ for mode in ["raw", "simple", "tf", "imagenet"]:
     raw_out = run(arr)
     print(f"   raw output : {np.array2string(raw_out, precision=4, suppress_small=True)}")
 
-    # Decide whether to apply softmax
     if raw_out.min() >= -0.01 and abs(raw_out.sum() - 1.0) < 0.05:
         probs = raw_out
         note  = "(already probabilities)"
@@ -128,7 +110,6 @@ for mode in ["raw", "simple", "tf", "imagenet"]:
     conf      = float(probs.max()) * 100
     print(f"   → Prediction: {predicted.upper()}  ({conf:.1f}%)")
 
-    # Entropy: higher = more spread = more likely correct preprocessing
     entropy = float(-np.sum(probs * np.log(probs + 1e-9)))
     print(f"   entropy (higher = better spread): {entropy:.4f}")
 
