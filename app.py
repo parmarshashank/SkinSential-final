@@ -130,20 +130,104 @@ class SkinClassifierApp:
     def _build_ui(self):
         root = self.root
 
-        root.columnconfigure(0, weight=1)
-        root.rowconfigure(2, weight=1)
+        # Landscape two-column split: controls left, image right
+        root.columnconfigure(0, weight=0)  # left panel — fixed width
+        root.columnconfigure(1, weight=1)  # right panel — expands
+        root.rowconfigure(0, weight=1)
 
-        tk.Label(root, text="Skin Disease Classifier",
-                 font=FONT_TITLE, bg=BG, fg=TEXT_DARK
-        ).grid(row=0, column=0, pady=(16, 2))
+        # ── Left panel ────────────────────────────────────────────────
+        left = tk.Frame(root, bg=BG, width=192)
+        left.pack_propagate(False)          # hold fixed width regardless of children
+        left.grid(row=0, column=0, sticky="nsew")
 
-        tk.Label(root, text="Offline · AI-powered · Private",
-                 font=FONT_SUB, bg=BG, fg=TEXT_LIGHT
-        ).grid(row=1, column=0, pady=(0, 8))
+        tk.Label(left, text="Skin Classifier",
+                 font=("Helvetica", 11, "bold"), bg=BG, fg=TEXT_DARK,
+        ).pack(pady=(10, 1), padx=8)
 
+        tk.Label(left, text="Offline · AI-powered",
+                 font=("Helvetica", 7), bg=BG, fg=TEXT_LIGHT,
+        ).pack(pady=(0, 5))
+
+        tk.Frame(left, bg=ACCENT_LINE, height=1).pack(fill="x")
+
+        # Source bar
+        src_bar = tk.Frame(left, bg="#E2E6EF")
+        src_bar.pack(fill="x", pady=(3, 3))
+
+        self._src_var = tk.StringVar()
+        tk.Label(src_bar, textvariable=self._src_var,
+                 font=("Helvetica", 7), bg="#E2E6EF", fg=TEXT_MID,
+                 anchor="w", padx=4, pady=2,
+        ).pack(side="left", fill="x", expand=True)
+
+        _ColorButton(src_bar, "⚙", self._open_camera_settings,
+                     "#5A6270", font=("Helvetica", 9, "bold"),
+                     padx=8, pady=3,
+        ).pack(side="right", padx=2, pady=2)
+
+        tk.Frame(left, bg=ACCENT_LINE, height=1).pack(fill="x")
+
+        # Buttons
+        btn_area = tk.Frame(left, bg=BG)
+        btn_area.pack(fill="x", padx=8, pady=(8, 0))
+
+        self._btn_capture = _ColorButton(
+            btn_area, "Capture Image", self.capture_image, BTN_BLUE,
+            font=("Helvetica", 10, "bold"), padx=4, pady=11)
+        self._btn_capture.pack(fill="x", pady=(0, 5))
+
+        self._btn_upload = _ColorButton(
+            btn_area, "Upload Image", self.upload_image, BTN_GREY,
+            font=("Helvetica", 10, "bold"), padx=4, pady=11)
+        self._btn_upload.pack(fill="x", pady=(0, 7))
+
+        tk.Frame(btn_area, bg=ACCENT_LINE, height=1).pack(fill="x", pady=(0, 7))
+
+        self._btn_predict = _ColorButton(
+            btn_area, "Predict", self.predict, BTN_GREEN,
+            font=("Helvetica", 12, "bold"), padx=4, pady=13)
+        self._btn_predict.pack(fill="x", pady=(0, 7))
+        self._btn_predict.set_enabled(False)
+
+        # Result card
+        result_border = tk.Frame(left, bg=ACCENT_LINE)
+        result_border.pack(fill="x", padx=8, pady=(0, 7))
+
+        result_card = tk.Frame(result_border, bg=CARD_BG, padx=8, pady=7)
+        result_card.pack(fill="both", padx=1, pady=1)
+
+        self._lbl_class = tk.Label(
+            result_card, text="Class:  —",
+            font=("Helvetica", 10, "bold"), bg=CARD_BG, fg=TEXT_DARK, anchor="w")
+        self._lbl_class.pack(anchor="w")
+
+        self._lbl_confidence = tk.Label(
+            result_card, text="Conf:  —",
+            font=("Helvetica", 9), bg=CARD_BG, fg=TEXT_MID, anchor="w")
+        self._lbl_confidence.pack(anchor="w")
+
+        # Explain button
+        self._btn_explain = _ColorButton(
+            left, "Explain (Grad-CAM)", self.explain, BTN_ORANGE,
+            font=("Helvetica", 9, "bold"), padx=4, pady=11)
+        self._btn_explain.pack(fill="x", padx=8, pady=(0, 6))
+        self._btn_explain.set_enabled(False)
+
+        # Spacer pushes status bar to bottom
+        tk.Frame(left, bg=BG).pack(fill="both", expand=True)
+
+        # Status bar pinned to bottom of left panel
+        self._status_var = tk.StringVar()
+        tk.Label(left, textvariable=self._status_var,
+                 font=("Helvetica", 7), bg="#C8CDD8", fg=TEXT_MID,
+                 anchor="w", padx=6, pady=4,
+                 wraplength=180, justify="left",
+        ).pack(fill="x", side="bottom")
+
+        # ── Right panel: image preview (fills remaining space) ────────
         preview_border = tk.Frame(root, bg=ACCENT_LINE)
-        preview_border.grid(row=2, column=0, padx=24, pady=(0, 8),
-                            sticky="nsew")
+        preview_border.grid(row=0, column=1, sticky="nsew",
+                            padx=(0, 4), pady=4)
         preview_border.rowconfigure(0, weight=1)
         preview_border.columnconfigure(0, weight=1)
 
@@ -154,72 +238,12 @@ class SkinClassifierApp:
 
         self._img_label = tk.Label(
             self._preview_frame,
-            text="No image loaded\n\nCapture from webcam\nor upload a file",
+            text="No image\n\nCapture or\nupload",
             font=FONT_LABEL, bg=IMG_BG, fg=TEXT_LIGHT, justify="center",
         )
         self._img_label.grid(row=0, column=0, sticky="nsew")
 
         self._preview_frame.bind("<Configure>", self._on_preview_resize)
-
-        src_bar = tk.Frame(root, bg="#E2E6EF")
-        src_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 4))
-
-        self._src_var = tk.StringVar()
-        tk.Label(src_bar, textvariable=self._src_var,
-                 font=("Helvetica", 9), bg="#E2E6EF", fg=TEXT_MID,
-                 anchor="w", padx=4, pady=4,
-        ).pack(side="left", fill="x", expand=True)
-
-        _ColorButton(src_bar, "⚙  Camera", self._open_camera_settings,
-                     "#5A6270", font=("Helvetica", 9, "bold"),
-                     padx=10, pady=4,
-        ).pack(side="right", padx=4, pady=3)
-
-        btn_row = tk.Frame(root, bg=BG)
-        btn_row.grid(row=4, column=0, pady=(0, 6))
-
-        self._btn_capture = _ColorButton(
-            btn_row, "Capture Image", self.capture_image, BTN_BLUE)
-        self._btn_capture.pack(side="left", padx=8)
-
-        self._btn_upload = _ColorButton(
-            btn_row, "Upload Image", self.upload_image, BTN_GREY)
-        self._btn_upload.pack(side="left", padx=8)
-
-        self._btn_predict = _ColorButton(
-            root, "        Predict        ", self.predict, BTN_GREEN,
-            font=("Helvetica", 13, "bold"), padx=36, pady=10)
-        self._btn_predict.grid(row=5, column=0, pady=(0, 8))
-        self._btn_predict.set_enabled(False)
-
-        result_border = tk.Frame(root, bg=ACCENT_LINE)
-        result_border.grid(row=6, column=0, padx=24, pady=(0, 8), sticky="ew")
-
-        result_card = tk.Frame(result_border, bg=CARD_BG, padx=18, pady=12)
-        result_card.pack(fill="both", padx=1, pady=1)
-        result_card.columnconfigure(0, weight=1)
-        result_card.columnconfigure(1, weight=1)
-
-        self._lbl_class = tk.Label(
-            result_card, text="Class:  —",
-            font=FONT_RES, bg=CARD_BG, fg=TEXT_DARK, anchor="w")
-        self._lbl_class.grid(row=0, column=0, sticky="w")
-
-        self._lbl_confidence = tk.Label(
-            result_card, text="Confidence:  —",
-            font=FONT_CONF, bg=CARD_BG, fg=TEXT_MID, anchor="e")
-        self._lbl_confidence.grid(row=0, column=1, sticky="e")
-
-        self._btn_explain = _ColorButton(
-            root, "Explain (Grad-CAM)", self.explain, BTN_ORANGE)
-        self._btn_explain.grid(row=7, column=0, pady=(0, 4))
-        self._btn_explain.set_enabled(False)
-
-        self._status_var = tk.StringVar()
-        tk.Label(root, textvariable=self._status_var,
-                 font=FONT_STATUS, bg="#C8CDD8", fg=TEXT_MID,
-                 anchor="w", padx=10, pady=4
-        ).grid(row=8, column=0, sticky="ew")
 
     def capture_image(self):
 
@@ -274,7 +298,7 @@ class SkinClassifierApp:
             class_name, confidence, class_idx = self.classifier.predict(self.input_array)
             self.last_class_idx = class_idx
             self._lbl_class.config(text=f"Class:  {class_name.capitalize()}")
-            self._lbl_confidence.config(text=f"Confidence:  {confidence:.1f}%")
+            self._lbl_confidence.config(text=f"Conf:  {confidence:.1f}%")
             self._btn_explain.set_enabled(True)
             self._set_status(f"Prediction: {class_name.capitalize()}  ({confidence:.1f}%)")
         except Exception as exc:
@@ -310,7 +334,7 @@ class SkinClassifierApp:
         self._btn_predict.set_enabled(True)
         self._btn_explain.set_enabled(False)
         self._lbl_class.config(text="Class:  —")
-        self._lbl_confidence.config(text="Confidence:  —")
+        self._lbl_confidence.config(text="Conf:  —")
 
     def _update_preview(self, pil: Image.Image):
         w = self._preview_frame.winfo_width()  or 400

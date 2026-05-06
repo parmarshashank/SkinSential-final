@@ -11,8 +11,8 @@ TF_SAVEDMODEL_FILE = "skinsential_model.keras"
 
 CLASSES = ["melanoma", "normal", "psoriasis", "ringworm"]
 
-WINDOW_WIDTH  = 520
-WINDOW_HEIGHT = 700
+WINDOW_WIDTH  = 480
+WINDOW_HEIGHT = 320
 
-MIN_WIDTH  = 420
-MIN_HEIGHT = 560
+MIN_WIDTH  = 400
+MIN_HEIGHT = 260
